@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Area,
@@ -32,6 +32,9 @@ import {
   FlaskConical,
   Gauge,
   Globe2,
+  Home,
+  Plus,
+  Save,
   Upload,
   LineChart,
   LogOut,
@@ -90,6 +93,20 @@ type MacroInputs = {
   liquidity: "Expanding" | "Neutral" | "Contracting";
 };
 
+type TransactionDraft = {
+  date: string;
+  type: PortfolioTransaction["type"];
+  symbol: string;
+  name: string;
+  assetClass: PortfolioTransaction["assetClass"];
+  units: string;
+  price: string;
+  fee: string;
+  currency: PortfolioTransaction["currency"];
+  accountName: string;
+  notes: string;
+};
+
 const formatTHB = new Intl.NumberFormat("th-TH", {
   style: "currency",
   currency: "THB",
@@ -136,6 +153,24 @@ const defaultMacro: MacroInputs = {
   liquidity: "Neutral",
 };
 
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+const defaultTransactionDraft: TransactionDraft = {
+  date: todayISO(),
+  type: "BUY",
+  symbol: "",
+  name: "",
+  assetClass: "Equity",
+  units: "",
+  price: "",
+  fee: "0",
+  currency: "USD",
+  accountName: "DIME",
+  notes: "",
+};
+
 type CioDecision = "Hold" | "Accumulate" | "Reduce" | "Hedge" | "Avoid";
 type ConfidenceLevel = "Low" | "Medium" | "High";
 
@@ -149,6 +184,8 @@ type BtcDcaPerformancePoint = {
   portfolioValueUSD: number;
   unrealizedPnlPct: number;
 };
+
+type MobileTab = "Dashboard" | "Portfolio" | "BTC" | "Risk" | "CIO";
 
 function marketStatus() {
   const now = new Date();
@@ -699,6 +736,321 @@ function MetricCard({
   );
 }
 
+function MobileStatCard({
+  label,
+  value,
+  sub,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  tone?: "neutral" | "positive" | "negative";
+}) {
+  return (
+    <div className="rounded-[24px] border border-white/10 bg-white/[0.065] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.32)] backdrop-blur-xl">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</p>
+      <p className="mt-3 text-2xl font-semibold tracking-tight text-white">{value}</p>
+      <p className={cn("mt-1 text-sm leading-5 text-slate-400", tone === "positive" && "text-emerald-300", tone === "negative" && "text-red-300")}>
+        {sub}
+      </p>
+    </div>
+  );
+}
+
+function MobileSection({
+  title,
+  children,
+  defaultOpen = true,
+}: {
+  title: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  return (
+    <details open={defaultOpen} className="group rounded-[26px] border border-white/10 bg-white/[0.055] p-4 backdrop-blur-xl">
+      <summary className="flex cursor-pointer list-none items-center justify-between text-base font-semibold text-white">
+        {title}
+        <span className="text-sm text-slate-500 transition group-open:rotate-180">⌄</span>
+      </summary>
+      <div className="mt-4">{children}</div>
+    </details>
+  );
+}
+
+function MobileBtcTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: BtcDcaPerformancePoint }>;
+}) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0].payload;
+  return (
+    <div className="min-w-[210px] rounded-2xl border border-emerald-400/20 bg-black/95 p-3 text-xs shadow-2xl">
+      <p className="font-semibold text-white">{point.date}</p>
+      <div className="mt-2 grid gap-1 text-slate-300">
+        <span>BTC {formatUSD.format(point.btcPriceUSD)}</span>
+        <span>Invested {formatUSD.format(point.dollarsInvested)}</span>
+        <span>BTC {point.btcAcquired.toFixed(8)}</span>
+        <span>Value {formatUSD.format(point.portfolioValueUSD)}</span>
+        <span className={point.unrealizedPnlPct >= 0 ? "text-emerald-300" : "text-red-300"}>
+          P/L {point.unrealizedPnlPct >= 0 ? "+" : ""}
+          {point.unrealizedPnlPct.toFixed(2)}%
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function MobilePrivateBankApp({
+  snapshot,
+  holdings,
+  allocation,
+  engine,
+  committee,
+  btcAnalytics,
+  liveAt,
+  loading,
+  onRefresh,
+}: {
+  snapshot?: PortfolioSnapshot;
+  holdings: Holding[];
+  allocation: PortfolioSnapshot["allocation"];
+  engine: ReturnType<typeof portfolioEngine>;
+  committee: ReturnType<typeof buildCommittee>;
+  btcAnalytics: ReturnType<typeof buildBtcAnalytics>;
+  liveAt: string;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  const [tab, setTab] = useState<MobileTab>("Dashboard");
+  const stocksValue = holdings.filter((holding) => holding.assetClass === "Equity" || holding.assetClass === "Fund").reduce((sum, holding) => sum + holding.value, 0);
+  const btcHolding = holdings.find((holding) => holding.assetClass === "Crypto" || holding.symbol.includes("BTC"));
+  const cashValue = holdings.filter((holding) => holding.assetClass === "Cash").reduce((sum, holding) => sum + holding.value, 0);
+  const sortedByPnl = holdings.filter((holding) => holding.assetClass !== "Cash").slice().sort((a, b) => b.unrealizedPnlPct - a.unrealizedPnlPct);
+  const topWinner = sortedByPnl[0];
+  const topLoser = sortedByPnl[sortedByPnl.length - 1];
+  const tabs: Array<{ name: MobileTab; icon: typeof Activity }> = [
+    { name: "Dashboard", icon: Home },
+    { name: "Portfolio", icon: WalletCards },
+    { name: "BTC", icon: Bitcoin },
+    { name: "Risk", icon: ShieldCheck },
+    { name: "CIO", icon: BrainCircuit },
+  ];
+
+  return (
+    <div className="xl:hidden">
+      <div className="min-h-screen bg-[#05070d] px-4 pb-28 pt-4 text-slate-100">
+        <div className="sticky top-0 z-30 -mx-4 border-b border-white/10 bg-[#05070d]/90 px-4 pb-4 pt-2 backdrop-blur-xl">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">PrivateBank OS</p>
+              <p className="mt-2 text-4xl font-semibold tracking-tight text-white">{formatTHB.format(snapshot?.totalValue || 0)}</p>
+              <p className={cn("mt-1 text-sm font-semibold", (snapshot?.unrealizedPnl || 0) >= 0 ? "text-emerald-300" : "text-red-300")}>
+                {formatTHB.format(snapshot?.unrealizedPnl || 0)} · {(snapshot?.unrealizedPnlPct || 0) >= 0 ? "+" : ""}
+                {(snapshot?.unrealizedPnlPct || 0).toFixed(2)}%
+              </p>
+              <p className="mt-1 text-xs text-slate-500">Updated {liveAt}</p>
+            </div>
+            <button
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white text-slate-950"
+              onClick={onRefresh}
+              type="button"
+              aria-label="Refresh"
+            >
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <MobileStatCard label="Net Worth" value={formatTHB.format(snapshot?.totalValue || 0)} sub={`${holdings.length} holdings`} />
+          <MobileStatCard label="US Stocks" value={formatTHB.format(stocksValue)} sub={`${engine.equityExposure.toFixed(1)}% equity`} />
+          <MobileStatCard label="BTC" value={formatTHB.format(btcHolding?.value || 0)} sub={`${engine.btcExposure.toFixed(1)}% crypto`} tone={engine.btcExposure > 20 ? "negative" : "neutral"} />
+          <MobileStatCard label="Cash" value={formatTHB.format(cashValue)} sub={`${engine.cashReservePct.toFixed(1)}% reserve`} />
+          <div className="col-span-2">
+            <MobileStatCard label="Risk Level" value={snapshot?.risk.level || "Loading"} sub={committee.decision} tone={snapshot?.risk.level === "High" ? "negative" : "neutral"} />
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4">
+          {tab === "Dashboard" && (
+            <>
+              <MobileSection title="Allocation">
+                <div className="grid gap-4 sm:grid-cols-[160px_1fr]">
+                  <div className="h-[180px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={allocation} dataKey="value" nameKey="name" innerRadius={52} outerRadius={78} paddingAngle={3}>
+                          {allocation.map((item, index) => (
+                            <Cell key={item.name} fill={allocationColors[index % allocationColors.length]} />
+                          ))}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="grid gap-2">
+                    {allocation.map((item, index) => (
+                      <div key={item.name} className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/25 px-3 py-3">
+                        <span className="flex items-center gap-2 text-sm text-slate-300">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: allocationColors[index % allocationColors.length] }} />
+                          {item.name}
+                        </span>
+                        <span className="text-sm font-semibold text-white">{item.value.toFixed(1)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </MobileSection>
+
+              <MobileSection title="Performance">
+                <div className="grid gap-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3">
+                      <p className="text-xs uppercase tracking-[0.14em] text-emerald-200">Top Winner</p>
+                      <p className="mt-2 text-xl font-semibold text-white">{topWinner?.symbol || "--"}</p>
+                      <p className="text-sm text-emerald-300">+{(topWinner?.unrealizedPnlPct || 0).toFixed(2)}%</p>
+                    </div>
+                    <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-3">
+                      <p className="text-xs uppercase tracking-[0.14em] text-red-200">Top Loser</p>
+                      <p className="mt-2 text-xl font-semibold text-white">{topLoser?.symbol || "--"}</p>
+                      <p className="text-sm text-red-300">{(topLoser?.unrealizedPnlPct || 0).toFixed(2)}%</p>
+                    </div>
+                  </div>
+                  {holdings.filter((holding) => holding.assetClass !== "Cash").slice(0, 6).map((holding) => (
+                    <div key={holding.symbol} className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/25 p-3">
+                      <div>
+                        <p className="font-semibold text-white">{holding.symbol}</p>
+                        <p className="text-xs text-slate-500">{holding.assetClass}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-white">{formatTHB.format(holding.value)}</p>
+                        <p className={cn("text-sm font-semibold", holding.unrealizedPnlPct >= 0 ? "text-emerald-300" : "text-red-300")}>
+                          {holding.unrealizedPnlPct >= 0 ? "+" : ""}{holding.unrealizedPnlPct.toFixed(2)}%
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </MobileSection>
+            </>
+          )}
+
+          {tab === "Portfolio" && (
+            <MobileSection title="Portfolio Positions">
+              <div className="grid gap-3">
+                {holdings.map((holding) => (
+                  <div key={holding.symbol} className="rounded-[22px] border border-white/10 bg-black/25 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-lg font-semibold text-white">{holding.symbol}</p>
+                        <p className="text-sm text-slate-400">{holding.name}</p>
+                      </div>
+                      <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-xs text-slate-300">{holding.weight.toFixed(1)}%</span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-slate-500">Value</p>
+                        <p className="font-semibold text-white">{formatTHB.format(holding.value)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-slate-500">P/L</p>
+                        <p className={cn("font-semibold", holding.unrealizedPnlPct >= 0 ? "text-emerald-300" : "text-red-300")}>
+                          {holding.unrealizedPnlPct >= 0 ? "+" : ""}{holding.unrealizedPnlPct.toFixed(2)}%
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </MobileSection>
+          )}
+
+          {tab === "BTC" && (
+            <>
+              <MobileSection title="BTC DCA">
+                <div className="mb-4 grid grid-cols-2 gap-3">
+                  <MobileStatCard label="Holdings" value={`${btcTotals.totalBtcHoldings.toFixed(5)} BTC`} sub={`${btcLedger.length} DCA lots`} />
+                  <MobileStatCard label="BTC P/L" value={`${btcTotals.totalUnrealizedPnlPct.toFixed(2)}%`} sub={formatUSD.format(btcTotals.totalMarketValueUSD)} tone="negative" />
+                </div>
+                <div className="h-[260px] rounded-2xl border border-emerald-400/10 bg-black p-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={btcAnalytics.performance} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke="rgba(34,197,94,0.1)" strokeDasharray="2 8" />
+                      <XAxis dataKey="date" hide />
+                      <YAxis yAxisId="price" hide domain={["dataMin", "dataMax"]} />
+                      <YAxis yAxisId="portfolio" hide orientation="right" />
+                      <Tooltip content={<MobileBtcTooltip />} cursor={{ stroke: "rgba(0,255,102,0.45)", strokeDasharray: "4 4" }} />
+                      <Line yAxisId="price" dataKey="btcPriceUSD" type="monotone" stroke="#00ff66" strokeWidth={2.5} dot={false} />
+                      <Line yAxisId="portfolio" dataKey="portfolioValueUSD" type="monotone" stroke="#ffb020" strokeWidth={2.5} dot={false} />
+                      <Line yAxisId="portfolio" dataKey="cumulativeInvestedUSD" type="monotone" stroke="#9ddcff" strokeWidth={2.5} dot={false} />
+                      <Scatter yAxisId="price" dataKey="btcPriceUSD" fill="#ffd166" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </MobileSection>
+            </>
+          )}
+
+          {tab === "Risk" && (
+            <MobileSection title="Risk Dashboard">
+              <div className="grid gap-3">
+                <MobileStatCard label="Drawdown" value={`${engine.drawdown.toFixed(1)}%`} sub={formatTHB.format(engine.drawdownAmount)} tone="negative" />
+                <MobileStatCard label="Concentration" value={engine.concentrationRisk} sub={`Largest ${engine.largestHoldingWeight.toFixed(1)}%`} tone={engine.concentrationRisk === "High" ? "negative" : "neutral"} />
+                {committee.risks.map((risk) => (
+                  <div key={risk} className="rounded-2xl border border-white/10 bg-black/25 p-4 text-sm leading-6 text-slate-300">{risk}</div>
+                ))}
+              </div>
+            </MobileSection>
+          )}
+
+          {tab === "CIO" && (
+            <MobileSection title="AI Committee">
+              <div className="grid gap-3">
+                {committee.agents.map((agent) => (
+                  <div key={agent.name} className="rounded-[22px] border border-white/10 bg-black/25 p-4">
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold text-white">{agent.name}</p>
+                      <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-[11px] text-slate-300">{agent.role}</span>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-slate-300">{agent.view}</p>
+                  </div>
+                ))}
+                <div className="rounded-[26px] border border-emerald-400/20 bg-emerald-400/10 p-4">
+                  <p className="text-xs uppercase tracking-[0.14em] text-emerald-200">CIO Decision</p>
+                  <p className="mt-2 text-3xl font-semibold text-white">{committee.decision}</p>
+                  <p className="mt-2 text-sm leading-6 text-emerald-100">{committee.privateBankerNote}</p>
+                </div>
+              </div>
+            </MobileSection>
+          )}
+        </div>
+      </div>
+
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-black/85 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl">
+        <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
+          {tabs.map(({ name, icon: Icon }) => (
+            <button
+              key={name}
+              className={cn(
+                "flex h-14 flex-col items-center justify-center gap-1 rounded-2xl text-[11px] font-semibold text-slate-500 transition",
+                tab === name && "bg-white text-slate-950"
+              )}
+              onClick={() => setTab(name)}
+              type="button"
+            >
+              <Icon className="h-4 w-4" />
+              {name}
+            </button>
+          ))}
+        </div>
+      </nav>
+    </div>
+  );
+}
+
 function TradingViewChart({ symbol = "NASDAQ:AAPL" }: { symbol?: string }) {
   const src = `https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(symbol)}&interval=D&hidesidetoolbar=1&symboledit=1&saveimage=0&toolbarbg=0b1220&studies=[]&theme=dark&style=1&timezone=Etc/UTC&withdateranges=1`;
   return (
@@ -719,6 +1071,8 @@ export default function DashboardPage() {
   const [status, setStatus] = useState(marketStatus());
   const [macroInputs, setMacroInputs] = useState<MacroInputs>(defaultMacro);
   const [selectedChart, setSelectedChart] = useState("NASDAQ:MSFT");
+  const [transactionDraft, setTransactionDraft] = useState<TransactionDraft>(defaultTransactionDraft);
+  const [savingTransaction, setSavingTransaction] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   async function loadPortfolio() {
@@ -784,6 +1138,56 @@ export default function DashboardPage() {
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : "Unable to import portfolio JSON");
       setLoading(false);
+    }
+  }
+
+  async function addTransactionFromForm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingTransaction(true);
+    setError("");
+    try {
+      const symbol = transactionDraft.symbol.trim().toUpperCase();
+      const units = Number(transactionDraft.units);
+      const price = Number(transactionDraft.price);
+      const fee = Number(transactionDraft.fee || 0);
+
+      if (!symbol) throw new Error("Please enter a ticker or asset symbol.");
+      if (!Number.isFinite(units) || units <= 0) throw new Error("Units must be greater than zero.");
+      if (!Number.isFinite(price) || price < 0) throw new Error("Price must be zero or greater.");
+      if (!Number.isFinite(fee) || fee < 0) throw new Error("Fee must be zero or greater.");
+
+      const response = await fetch("/api/portfolio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add-transaction",
+          transaction: {
+            date: transactionDraft.date || todayISO(),
+            purchaseDate: transactionDraft.date || todayISO(),
+            type: transactionDraft.type,
+            symbol,
+            name: transactionDraft.name.trim() || symbol,
+            assetClass: transactionDraft.assetClass,
+            units,
+            price,
+            fee,
+            currency: transactionDraft.currency,
+            accountName: transactionDraft.accountName.trim() || undefined,
+            notes: transactionDraft.notes.trim() || undefined,
+          },
+        }),
+      });
+      if (!response.ok) throw new Error(`Unable to add transaction: ${response.status}`);
+      setTransactionDraft({
+        ...defaultTransactionDraft,
+        date: todayISO(),
+        accountName: transactionDraft.accountName || defaultTransactionDraft.accountName,
+      });
+      await loadPortfolio();
+    } catch (transactionError) {
+      setError(transactionError instanceof Error ? transactionError.message : "Unable to add transaction");
+    } finally {
+      setSavingTransaction(false);
     }
   }
 
@@ -863,7 +1267,18 @@ export default function DashboardPage() {
   return (
     <main className="min-h-screen overflow-hidden bg-[#05070d] text-slate-100">
       <div className="fixed inset-0 -z-10 bg-[radial-gradient(circle_at_20%_0%,rgba(56,189,248,0.16),transparent_34%),radial-gradient(circle_at_80%_10%,rgba(37,99,235,0.14),transparent_30%),linear-gradient(180deg,#05070d_0%,#080d18_45%,#03050a_100%)]" />
-      <div className="grid min-h-screen xl:grid-cols-[290px_minmax(0,1fr)]">
+      <MobilePrivateBankApp
+        snapshot={snapshot}
+        holdings={holdings}
+        allocation={allocation}
+        engine={engine}
+        committee={committee}
+        btcAnalytics={btcAnalytics}
+        liveAt={liveAt}
+        loading={loading}
+        onRefresh={loadPortfolio}
+      />
+      <div className="hidden min-h-screen xl:grid xl:grid-cols-[290px_minmax(0,1fr)]">
         <aside className="hidden border-r border-white/10 bg-black/40 p-5 backdrop-blur-xl xl:block">
           <div className="flex items-center gap-3 rounded-[24px] border border-white/10 bg-white/[0.06] p-4">
             <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-sm font-bold text-slate-950">CO</div>
@@ -998,6 +1413,143 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
+            </section>
+
+            <section id="add-transaction">
+              <ClaudyCard className="p-5">
+                <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                  <SectionTitle icon={Plus} title="Add Transaction" sub="Record buys, sells, cash deposits and withdrawals directly into the portfolio ledger" />
+                  <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-xs leading-5 text-slate-400">
+                    New entries recalculate allocation, cash reserve, P/L and risk immediately.
+                  </div>
+                </div>
+                <form className="grid gap-4" onSubmit={addTransactionFromForm}>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Date
+                      <input
+                        className="h-11 rounded-2xl border border-white/10 bg-black/40 px-3 text-sm normal-case tracking-normal text-white outline-none ring-sky-400/20 focus:ring-4"
+                        type="date"
+                        value={transactionDraft.date}
+                        onChange={(event) => setTransactionDraft({ ...transactionDraft, date: event.target.value })}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Type
+                      <select
+                        className="h-11 rounded-2xl border border-white/10 bg-black/40 px-3 text-sm normal-case tracking-normal text-white outline-none ring-sky-400/20 focus:ring-4"
+                        value={transactionDraft.type}
+                        onChange={(event) => setTransactionDraft({ ...transactionDraft, type: event.target.value as PortfolioTransaction["type"] })}
+                      >
+                        <option value="BUY">Buy</option>
+                        <option value="SELL">Sell</option>
+                        <option value="DIVIDEND">Dividend</option>
+                        <option value="DEPOSIT">Deposit</option>
+                        <option value="WITHDRAW">Withdraw</option>
+                        <option value="FEE">Fee</option>
+                      </select>
+                    </label>
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Symbol
+                      <input
+                        className="h-11 rounded-2xl border border-white/10 bg-black/40 px-3 text-sm normal-case tracking-normal text-white outline-none ring-sky-400/20 focus:ring-4"
+                        placeholder="MSFT, BTC, CASH"
+                        value={transactionDraft.symbol}
+                        onChange={(event) => setTransactionDraft({ ...transactionDraft, symbol: event.target.value })}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 xl:col-span-2">
+                      Name
+                      <input
+                        className="h-11 rounded-2xl border border-white/10 bg-black/40 px-3 text-sm normal-case tracking-normal text-white outline-none ring-sky-400/20 focus:ring-4"
+                        placeholder="Microsoft Corporation"
+                        value={transactionDraft.name}
+                        onChange={(event) => setTransactionDraft({ ...transactionDraft, name: event.target.value })}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Asset Class
+                      <select
+                        className="h-11 rounded-2xl border border-white/10 bg-black/40 px-3 text-sm normal-case tracking-normal text-white outline-none ring-sky-400/20 focus:ring-4"
+                        value={transactionDraft.assetClass}
+                        onChange={(event) => setTransactionDraft({ ...transactionDraft, assetClass: event.target.value as PortfolioTransaction["assetClass"] })}
+                      >
+                        <option value="Equity">Equity</option>
+                        <option value="Crypto">Crypto</option>
+                        <option value="Cash">Cash</option>
+                        <option value="Gold">Gold</option>
+                        <option value="Fund">Fund</option>
+                        <option value="Bond">Bond</option>
+                        <option value="Alternative">Alternative</option>
+                      </select>
+                    </label>
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Units
+                      <input
+                        className="h-11 rounded-2xl border border-white/10 bg-black/40 px-3 text-sm normal-case tracking-normal text-white outline-none ring-sky-400/20 focus:ring-4"
+                        inputMode="decimal"
+                        placeholder="10"
+                        value={transactionDraft.units}
+                        onChange={(event) => setTransactionDraft({ ...transactionDraft, units: event.target.value })}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Price
+                      <input
+                        className="h-11 rounded-2xl border border-white/10 bg-black/40 px-3 text-sm normal-case tracking-normal text-white outline-none ring-sky-400/20 focus:ring-4"
+                        inputMode="decimal"
+                        placeholder="421.06"
+                        value={transactionDraft.price}
+                        onChange={(event) => setTransactionDraft({ ...transactionDraft, price: event.target.value })}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Currency
+                      <select
+                        className="h-11 rounded-2xl border border-white/10 bg-black/40 px-3 text-sm normal-case tracking-normal text-white outline-none ring-sky-400/20 focus:ring-4"
+                        value={transactionDraft.currency}
+                        onChange={(event) => setTransactionDraft({ ...transactionDraft, currency: event.target.value as PortfolioTransaction["currency"] })}
+                      >
+                        <option value="USD">USD</option>
+                        <option value="THB">THB</option>
+                      </select>
+                    </label>
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Fee
+                      <input
+                        className="h-11 rounded-2xl border border-white/10 bg-black/40 px-3 text-sm normal-case tracking-normal text-white outline-none ring-sky-400/20 focus:ring-4"
+                        inputMode="decimal"
+                        value={transactionDraft.fee}
+                        onChange={(event) => setTransactionDraft({ ...transactionDraft, fee: event.target.value })}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Account
+                      <input
+                        className="h-11 rounded-2xl border border-white/10 bg-black/40 px-3 text-sm normal-case tracking-normal text-white outline-none ring-sky-400/20 focus:ring-4"
+                        placeholder="DIME"
+                        value={transactionDraft.accountName}
+                        onChange={(event) => setTransactionDraft({ ...transactionDraft, accountName: event.target.value })}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 md:col-span-2 xl:col-span-2">
+                      Notes
+                      <input
+                        className="h-11 rounded-2xl border border-white/10 bg-black/40 px-3 text-sm normal-case tracking-normal text-white outline-none ring-sky-400/20 focus:ring-4"
+                        placeholder="DCA, rebalance, dividend reinvestment"
+                        value={transactionDraft.notes}
+                        onChange={(event) => setTransactionDraft({ ...transactionDraft, notes: event.target.value })}
+                      />
+                    </label>
+                    <div className="flex items-end">
+                      <Button className="h-11 w-full bg-white text-slate-950 hover:bg-slate-200" disabled={savingTransaction || loading}>
+                        <Save className="mr-2 h-4 w-4" />
+                        {savingTransaction ? "Saving..." : "Save"}
+                      </Button>
+                    </div>
+                  </div>
+                </form>
+              </ClaudyCard>
             </section>
 
             <section id="portfolio-overview" className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">

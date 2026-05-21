@@ -67,6 +67,7 @@ export async function addTransaction(transaction: Omit<PortfolioTransaction, "id
     symbol: transaction.symbol.toUpperCase(),
   };
   data.transactions = [next, ...data.transactions];
+  data.totals = undefined;
   await writePortfolioData(data);
   return next;
 }

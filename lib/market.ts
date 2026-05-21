@@ -121,7 +121,7 @@ export async function getLiveMarketQuotes(tickers: string[]) {
     new Set(
       tickers
         .map(normalizeMarketTicker)
-        .filter((ticker) => ticker && SUPPORTED_MARKET_TICKERS.has(ticker))
+        .filter(Boolean)
     )
   );
   const requestedTickers = normalized.length ? normalized : DEFAULT_MARKET_TICKERS;

@@ -74,6 +74,7 @@ export async function POST(request: NextRequest) {
   if (action === "delete-transaction") {
     const data = await readPortfolioData();
     data.transactions = data.transactions.filter((transaction) => transaction.id !== body.id);
+    data.totals = undefined;
     await writePortfolioData(data);
     return NextResponse.json({ ok: true });
   }
