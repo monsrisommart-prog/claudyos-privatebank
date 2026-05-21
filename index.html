@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Private Banking Console</title>
+    <meta name="theme-color" content="#0d7c86" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Money Life" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/icon-192.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">ML</span>
+          <div>
+            <strong>Private Banking</strong>
+            <small>Wealth command center</small>
+          </div>
+        </div>
+
+        <nav class="nav-tabs" aria-label="มุมมองหลัก">
+          <button class="nav-tab active" data-view="overview" type="button">ภาพรวม</button>
+          <button class="nav-tab" data-view="transactions" type="button">รายการเงินสด</button>
+          <button class="nav-tab" data-view="portfolio" type="button">พอร์ตลงทุน</button>
+          <button class="nav-tab" data-view="roles" type="button">AI Agent</button>
+          <button class="nav-tab" data-view="line" type="button">LINE Data</button>
+        </nav>
+
+        <section class="data-tools" aria-label="เครื่องมือข้อมูล">
+          <button id="exportData" type="button">Export JSON</button>
+          <label class="import-button">
+            Import JSON
+            <input id="importData" type="file" accept="application/json" />
+          </label>
+          <button id="resetDemo" class="ghost" type="button">รีเซ็ตข้อมูลตัวอย่าง</button>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Private banking demo workspace</p>
+            <h1>Wealth Dashboard สำหรับลูกค้าพอร์ตส่วนตัว</h1>
+          </div>
+          <div class="topbar-actions">
+            <div class="advisor-status">
+              <span>Portfolio status</span>
+              <strong>Advisory review ready</strong>
+            </div>
+            <div class="period-control">
+              <label for="monthFilter">Month</label>
+              <input id="monthFilter" type="month" />
+            </div>
+            <div class="period-control">
+              <label for="activeRole">Agent mode</label>
+              <select id="activeRole"></select>
+            </div>
+          </div>
+        </header>
+
+        <section class="view active" id="overview">
+          <section class="hero-dashboard">
+            <div class="hero-copy">
+              <span class="status-chip">Private Client</span>
+              <h2>ภาพรวมความมั่งคั่ง กระแสเงินสด และพอร์ตลงทุน</h2>
+              <p>รวมข้อมูลสินทรัพย์ กระแสเงินสด ต้นทุน DCA และสัดส่วนการลงทุน เพื่อใช้เป็นตัวอย่างระบบดูแลพอร์ตแบบ Private Banking</p>
+            </div>
+            <div class="hero-numbers">
+              <div>
+                <span>Total AUM</span>
+                <strong id="netWorthTotal">฿0</strong>
+              </div>
+              <div>
+                <span>Monthly surplus</span>
+                <strong id="savingsRate">0%</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="client-strip">
+            <article>
+              <span>Client tier</span>
+              <strong>Private Wealth</strong>
+            </article>
+            <article>
+              <span>Risk profile</span>
+              <strong>Balanced Growth</strong>
+            </article>
+            <article>
+              <span>Investment policy</span>
+              <strong>Core-Satellite</strong>
+            </article>
+            <article>
+              <span>Review cycle</span>
+              <strong>Monthly</strong>
+            </article>
+          </section>
+
+          <div class="metric-grid">
+            <article class="metric income">
+              <span>รายรับเดือนนี้</span>
+              <strong id="incomeTotal">฿0</strong>
+            </article>
+            <article class="metric expense">
+              <span>รายจ่ายเดือนนี้</span>
+              <strong id="expenseTotal">฿0</strong>
+            </article>
+            <article class="metric savings">
+              <span>เงินคงเหลือ</span>
+              <strong id="cashFlow">฿0</strong>
+            </article>
+            <article class="metric portfolio-value">
+              <span>มูลค่าพอร์ต</span>
+              <strong id="portfolioTotal">฿0</strong>
+            </article>
+          </div>
+
+          <section class="insight-strip">
+            <div class="insight-main">
+              <span>Expense pressure</span>
+              <strong id="expensePressure">0%</strong>
+            </div>
+            <div class="progress-track" aria-hidden="true">
+              <span id="expensePressureBar"></span>
+            </div>
+            <p id="monthlyInsight">เริ่มบันทึกรายการเพื่อดูสุขภาพการเงินเดือนนี้</p>
+          </section>
+
+          <div class="dashboard-grid">
+            <section class="panel wide">
+              <div class="panel-title">
+                <h2>กระแสเงินสดรายวัน</h2>
+                <span id="selectedMonthLabel"></span>
+              </div>
+              <canvas id="cashChart" width="960" height="320" aria-label="กราฟรายรับรายจ่ายรายวัน"></canvas>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h2>สัดส่วนรายจ่าย</h2>
+              </div>
+              <div id="categoryBreakdown" class="breakdown-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h2>พอร์ตตามประเภทสินทรัพย์</h2>
+              </div>
+              <div id="assetBreakdown" class="breakdown-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h2>Private banking notes</h2>
+              </div>
+              <div class="advisory-list">
+                <div>
+                  <strong>Liquidity buffer</strong>
+                  <span>กันเงินสดฉุกเฉินก่อนเพิ่ม risk asset</span>
+                </div>
+                <div>
+                  <strong>DCA discipline</strong>
+                  <span>ดูต้นทุนเฉลี่ยก่อนเพิ่มไม้ใหม่</span>
+                </div>
+                <div>
+                  <strong>Rebalance watch</strong>
+                  <span>เทียบสัดส่วนสินทรัพย์ทุกเดือน</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="transactions">
+          <div class="split-layout">
+            <form id="transactionForm" class="panel form-panel">
+              <div class="panel-title">
+                <h2>เพิ่มรายการรายรับรายจ่าย</h2>
+              </div>
+              <div class="segmented">
+                <label><input type="radio" name="type" value="income" checked />รายรับ</label>
+                <label><input type="radio" name="type" value="expense" />รายจ่าย</label>
+              </div>
+              <label>วันที่<input name="date" type="date" required /></label>
+              <label>หมวดหมู่<input name="category" list="categoryList" placeholder="อาหาร, เงินเดือน, เดินทาง" required /></label>
+              <datalist id="categoryList">
+                <option value="เงินเดือน"></option>
+                <option value="อาหาร"></option>
+                <option value="เดินทาง"></option>
+                <option value="บ้าน"></option>
+                <option value="ลงทุน"></option>
+                <option value="สุขภาพ"></option>
+              </datalist>
+              <label>รายละเอียด<input name="note" placeholder="เช่น ข้าวกลางวัน" /></label>
+              <label>จำนวนเงิน<input name="amount" type="number" min="0" step="0.01" required /></label>
+              <button type="submit">บันทึกรายการ</button>
+            </form>
+
+            <section class="panel table-panel">
+              <div class="panel-title">
+                <h2>รายการล่าสุด</h2>
+                <input id="transactionSearch" type="search" placeholder="ค้นหารายการ" />
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>วันที่</th>
+                      <th>ประเภท</th>
+                      <th>หมวด</th>
+                      <th>รายละเอียด</th>
+                      <th>จำนวน</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="transactionRows"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="portfolio">
+          <div class="split-layout">
+            <div class="portfolio-forms">
+              <form id="assetForm" class="panel form-panel">
+                <div class="panel-title">
+                  <h2>เพิ่มสินทรัพย์ลงทุน</h2>
+                </div>
+                <label>ชื่อสินทรัพย์<input name="name" placeholder="เช่น SET50 ETF, BTC, หุ้น AOT" required /></label>
+                <label>Symbol / Ticker<input name="symbol" placeholder="เช่น AAPL.US, MSFT.US, bitcoin, ethereum" /></label>
+                <label>ประเภท
+                  <select name="assetClass">
+                    <option>หุ้นไทย</option>
+                    <option>หุ้นต่างประเทศ</option>
+                    <option>กองทุน</option>
+                    <option>คริปโต</option>
+                    <option>ตราสารหนี้</option>
+                    <option>เงินสด</option>
+                    <option>อื่น ๆ</option>
+                  </select>
+                </label>
+                <label>ตลาด / แหล่งราคา
+                  <select name="priceSource">
+                    <option value="manual">Manual</option>
+                    <option value="coingecko">CoinGecko Crypto</option>
+                    <option value="stooq">Stooq Stock</option>
+                  </select>
+                </label>
+                <button id="fetchAssetPrice" class="secondary-button" type="button">ดึงราคาล่าสุด</button>
+                <label>เงินลงทุนเริ่มต้น<input name="investmentAmount" type="number" min="0" step="any" inputmode="decimal" placeholder="เช่น 10000" /></label>
+                <label>จำนวนหน่วยเริ่มต้น<input name="units" type="number" min="0" step="any" inputmode="decimal" required /></label>
+                <label>ต้นทุนต่อหน่วยเริ่มต้น<input name="cost" type="number" min="0" step="any" inputmode="decimal" required /></label>
+                <label>ราคาปัจจุบันต่อหน่วย<input name="price" type="number" min="0" step="any" inputmode="decimal" required /></label>
+                <button type="submit">บันทึกสินทรัพย์</button>
+              </form>
+
+              <form id="tradeForm" class="panel form-panel">
+                <div class="panel-title">
+                  <h2>บันทึกไม้ซื้อขาย / DCA</h2>
+                </div>
+                <label>สินทรัพย์
+                  <select name="assetId" id="tradeAssetSelect" required></select>
+                </label>
+                <div class="segmented">
+                  <label><input type="radio" name="tradeType" value="buy" checked />ซื้อ</label>
+                  <label><input type="radio" name="tradeType" value="sell" />ขาย</label>
+                </div>
+                <label>วันที่<input name="date" type="date" required /></label>
+                <button id="fetchTradePrice" class="secondary-button" type="button">ดึงราคาล่าสุดของสินทรัพย์นี้</button>
+                <label>เงินลงทุน / มูลค่าขาย<input name="tradeAmount" type="number" min="0" step="any" inputmode="decimal" placeholder="เช่น 5000" /></label>
+                <label>จำนวนหน่วย<input name="units" type="number" min="0" step="any" inputmode="decimal" required /></label>
+                <label>ราคาต่อหน่วย<input name="price" type="number" min="0" step="any" inputmode="decimal" required /></label>
+                <label>ค่าธรรมเนียม<input name="fee" type="number" min="0" step="any" inputmode="decimal" value="0" /></label>
+                <button type="submit">บันทึกไม้</button>
+              </form>
+            </div>
+
+            <section class="panel table-panel">
+              <div class="panel-title">
+                <div>
+                  <h2>พอร์ตทั้งหมด</h2>
+                  <span id="priceUpdateStatus">ราคายังไม่ได้ refresh</span>
+                </div>
+                <div class="portfolio-actions">
+                  <button id="refreshPrices" class="secondary-button" type="button">Refresh prices</button>
+                  <strong id="portfolioGain">฿0</strong>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>สินทรัพย์</th>
+                      <th>ประเภท</th>
+                      <th>จำนวน / ต้นทุน</th>
+                      <th>ราคา / อัปเดต</th>
+                      <th>มูลค่า</th>
+                      <th>กำไร/ขาดทุน</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="assetRows"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="roles">
+          <div class="role-layout">
+            <section class="panel">
+              <div class="panel-title">
+                <div>
+                  <h2>AI Portfolio Agent</h2>
+                  <span>ผู้ช่วยวิเคราะห์พอร์ต ต้นทุน DCA กระแสเงินสด และสัญญาณ rebalance</span>
+                </div>
+              </div>
+              <div id="roleCards" class="role-cards"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <div>
+                  <h2>Agent briefing</h2>
+                  <span>สรุปจากข้อมูลปัจจุบันใน dashboard</span>
+                </div>
+              </div>
+              <div id="roleDetail" class="role-detail"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="line">
+          <div class="line-layout">
+            <section class="panel form-panel">
+              <div class="panel-title">
+                <h2>ทดลองแปลงข้อความจาก LINE</h2>
+              </div>
+              <p class="muted">พิมพ์ข้อความแบบสั้น เช่น “จ่าย อาหาร 120 ข้าวกลางวัน” หรือ “รับ เงินเดือน 45000”</p>
+              <textarea id="lineMessage" rows="6" placeholder="จ่าย กาแฟ 75 อเมริกาโน่"></textarea>
+              <button id="parseLine" type="button">แปลงเป็นรายการ</button>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h2>Webhook ที่ต่อได้ภายหลัง</h2>
+              </div>
+              <ol class="setup-list">
+                <li>สร้าง LINE Official Account และเปิด Messaging API</li>
+                <li>รับข้อความจาก LINE Webhook ที่ backend</li>
+                <li>ส่งข้อความเข้า parser รูปแบบเดียวกับหน้านี้</li>
+                <li>บันทึกลงฐานข้อมูล เช่น Supabase, Firebase หรือ PostgreSQL</li>
+              </ol>
+              <pre><code>POST /line-webhook
+{ "text": "จ่าย อาหาร 120 ข้าวเย็น" }</code></pre>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

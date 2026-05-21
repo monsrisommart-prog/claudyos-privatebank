@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Money Life">
+  <rect width="512" height="512" rx="112" fill="#0d7c86"/>
+  <path d="M112 334V178h56l88 105 88-105h56v156h-51v-86l-74 86h-38l-74-86v86h-51Z" fill="#fff"/>
+  <path d="M130 388h252" stroke="#f2c14e" stroke-width="28" stroke-linecap="round"/>
+</svg>
