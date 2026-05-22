@@ -53,6 +53,9 @@ type PortfolioResponse = {
   data: {
     clientName: string;
     watchlist: string[];
+    fx?: {
+      USDTHB: number;
+    };
     cashflow: CashflowProfile;
     transactions: PortfolioTransaction[];
   };
@@ -107,6 +110,17 @@ type TransactionDraft = {
   notes: string;
 };
 
+type TotalPortfolioPerformancePoint = {
+  date: string;
+  symbol: string;
+  type: PortfolioTransaction["type"];
+  assetClass: PortfolioTransaction["assetClass"];
+  cashFlowTHB: number;
+  cumulativeInvestedTHB: number;
+  portfolioValueTHB: number;
+  unrealizedPnlPct: number;
+};
+
 const formatTHB = new Intl.NumberFormat("th-TH", {
   style: "currency",
   currency: "THB",
@@ -121,6 +135,11 @@ const formatUSD = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   maximumFractionDigits: 2,
+});
+
+const formatCompactTHB = new Intl.NumberFormat("th-TH", {
+  notation: "compact",
+  maximumFractionDigits: 1,
 });
 
 const allocationColors = ["#38bdf8", "#22c55e", "#f59e0b", "#a78bfa", "#94a3b8", "#ef4444", "#14b8a6"];
@@ -155,6 +174,20 @@ const defaultMacro: MacroInputs = {
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function txDate(transaction: PortfolioTransaction) {
+  const raw = transaction.date || transaction.purchaseDate || "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return new Date(raw);
+  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(raw)) {
+    const [day, month, year] = raw.split("/").map(Number);
+    return new Date(year < 100 ? 2000 + year : year, month - 1, day);
+  }
+  return new Date(0);
+}
+
+function shortDate(date: Date) {
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
 const defaultTransactionDraft: TransactionDraft = {
@@ -382,6 +415,101 @@ function BtcDcaTooltip({
         <div className="flex justify-between gap-4 text-slate-300">
           <span>Portfolio value</span>
           <span className="font-semibold text-orange-300">{formatUSD.format(point.portfolioValueUSD)}</span>
+        </div>
+        <div className="flex justify-between gap-4 text-slate-300">
+          <span>Unrealized P/L</span>
+          <span className={cn("font-semibold", point.unrealizedPnlPct >= 0 ? "text-emerald-300" : "text-red-300")}>
+            {point.unrealizedPnlPct >= 0 ? "+" : ""}
+            {point.unrealizedPnlPct.toFixed(2)}%
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildTotalPortfolioPerformance(portfolio: PortfolioResponse | null): TotalPortfolioPerformancePoint[] {
+  const data = portfolio?.data;
+  if (!data) return [];
+  const usdthb = portfolio.data.fx?.USDTHB || 32.5642;
+  let cumulativeInvestedTHB = 0;
+  let portfolioValueTHB = 0;
+
+  const points = data.transactions
+    .slice()
+    .sort((a, b) => txDate(a).getTime() - txDate(b).getTime())
+    .map((transaction) => {
+      const transactionAmountTHB =
+        transaction.investedTHB ??
+        (transaction.currency === "USD" ? transaction.units * transaction.price * usdthb : transaction.units * transaction.price);
+      const currentValueTHB = transaction.currentMarketValueTHB ?? transactionAmountTHB;
+      const direction = transaction.type === "SELL" || transaction.type === "WITHDRAW" || transaction.type === "FEE" ? -1 : 1;
+
+      if (transaction.type === "DIVIDEND") {
+        portfolioValueTHB += transactionAmountTHB;
+      } else {
+        cumulativeInvestedTHB += direction * transactionAmountTHB;
+        portfolioValueTHB += direction * currentValueTHB;
+      }
+
+      return {
+        date: shortDate(txDate(transaction)),
+        symbol: transaction.symbol,
+        type: transaction.type,
+        assetClass: transaction.assetClass,
+        cashFlowTHB: direction * transactionAmountTHB,
+        cumulativeInvestedTHB: Math.max(0, cumulativeInvestedTHB),
+        portfolioValueTHB: Math.max(0, portfolioValueTHB),
+        unrealizedPnlPct: cumulativeInvestedTHB ? ((portfolioValueTHB - cumulativeInvestedTHB) / cumulativeInvestedTHB) * 100 : 0,
+      };
+    });
+
+  if (portfolio.snapshot && points.length) {
+    const latest = points[points.length - 1];
+    points.push({
+      ...latest,
+      date: "Now",
+      symbol: "PORT",
+      type: "BUY",
+      assetClass: "Alternative",
+      cashFlowTHB: 0,
+      cumulativeInvestedTHB: portfolio.snapshot.totalCost,
+      portfolioValueTHB: portfolio.snapshot.totalValue,
+      unrealizedPnlPct: portfolio.snapshot.unrealizedPnlPct,
+    });
+  }
+
+  return points;
+}
+
+function TotalPortfolioTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: TotalPortfolioPerformancePoint }>;
+}) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0].payload;
+
+  return (
+    <div className="min-w-[250px] rounded-xl border border-emerald-400/25 bg-black/95 p-4 shadow-2xl shadow-emerald-950/30 backdrop-blur">
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300">{point.date}</p>
+        <p className="text-sm font-semibold text-white">{point.symbol}</p>
+      </div>
+      <div className="mt-3 grid gap-2 text-sm">
+        <div className="flex justify-between gap-4 text-slate-300">
+          <span>Portfolio value</span>
+          <span className="font-semibold text-[#00ff66]">{formatTHB.format(point.portfolioValueTHB)}</span>
+        </div>
+        <div className="flex justify-between gap-4 text-slate-300">
+          <span>Invested capital</span>
+          <span className="font-semibold text-[#9ddcff]">{formatTHB.format(point.cumulativeInvestedTHB)}</span>
+        </div>
+        <div className="flex justify-between gap-4 text-slate-300">
+          <span>Transaction</span>
+          <span className="font-semibold text-[#ffd166]">{point.type} {formatTHB.format(Math.abs(point.cashFlowTHB))}</span>
         </div>
         <div className="flex justify-between gap-4 text-slate-300">
           <span>Unrealized P/L</span>
@@ -811,6 +939,7 @@ function MobilePrivateBankApp({
   engine,
   committee,
   btcAnalytics,
+  totalPortfolioPerformance,
   liveAt,
   loading,
   onRefresh,
@@ -821,6 +950,7 @@ function MobilePrivateBankApp({
   engine: ReturnType<typeof portfolioEngine>;
   committee: ReturnType<typeof buildCommittee>;
   btcAnalytics: ReturnType<typeof buildBtcAnalytics>;
+  totalPortfolioPerformance: TotalPortfolioPerformancePoint[];
   liveAt: string;
   loading: boolean;
   onRefresh: () => void;
@@ -902,6 +1032,27 @@ function MobilePrivateBankApp({
                       </div>
                     ))}
                   </div>
+                </div>
+              </MobileSection>
+
+              <MobileSection title="Total Portfolio Chart">
+                <div className="mb-3 flex flex-wrap gap-2 text-[11px] font-semibold">
+                  <span className="text-[#00ff66]">● Value</span>
+                  <span className="text-[#9ddcff]">● Invested</span>
+                  <span className="text-[#ffd166]">● Transactions</span>
+                </div>
+                <div className="h-[260px] rounded-2xl border border-emerald-400/10 bg-black p-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={totalPortfolioPerformance} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke="rgba(34,197,94,0.1)" strokeDasharray="2 8" />
+                      <XAxis dataKey="date" hide />
+                      <YAxis hide domain={["dataMin", "dataMax"]} />
+                      <Tooltip content={<TotalPortfolioTooltip />} cursor={{ stroke: "rgba(0,255,102,0.45)", strokeDasharray: "4 4" }} />
+                      <Line dataKey="portfolioValueTHB" name="Portfolio value" type="monotone" stroke="#00ff66" strokeWidth={2.5} dot={false} />
+                      <Line dataKey="cumulativeInvestedTHB" name="Total invested" type="monotone" stroke="#9ddcff" strokeWidth={2.5} dot={false} />
+                      <Scatter dataKey="portfolioValueTHB" name="Transactions" fill="#ffd166" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
                 </div>
               </MobileSection>
 
@@ -1217,6 +1368,7 @@ export default function DashboardPage() {
   const engine = useMemo(() => portfolioEngine(snapshot, holdings), [snapshot, holdings]);
   const intelligence = useMemo(() => buildPortfolioIntelligence(holdings), [holdings]);
   const btcAnalytics = useMemo(() => buildBtcAnalytics(snapshot?.totalValue || 0), [snapshot?.totalValue]);
+  const totalPortfolioPerformance = useMemo(() => buildTotalPortfolioPerformance(portfolio), [portfolio]);
   const scenarios = useMemo(() => runScenarios(holdings), [holdings]);
   const worstScenario = useMemo(
     () => scenarios.slice().sort((a, b) => a.impactPct - b.impactPct)[0],
@@ -1274,6 +1426,7 @@ export default function DashboardPage() {
         engine={engine}
         committee={committee}
         btcAnalytics={btcAnalytics}
+        totalPortfolioPerformance={totalPortfolioPerformance}
         liveAt={liveAt}
         loading={loading}
         onRefresh={loadPortfolio}
@@ -1562,6 +1715,77 @@ export default function DashboardPage() {
               />
               <MetricCard label="Cash Reserve" value={`${(snapshot?.cashReserveMonths || 0).toFixed(1)} mo`} sub="Liquidity coverage" />
               <MetricCard label="Risk Level" value={snapshot?.risk.level || "Loading"} sub={committee.decision} tone={snapshot?.risk.level === "High" ? "negative" : "neutral"} />
+            </section>
+
+            <section>
+              <ClaudyCard className="p-5">
+                <SectionTitle
+                  icon={LineChart}
+                  title="Total Portfolio Performance Chart"
+                  sub="Portfolio value, invested capital and transaction points across the whole PrivateBank OS ledger"
+                />
+                <div
+                  className="rounded-2xl border border-emerald-400/15 bg-black p-4 shadow-2xl shadow-black/40"
+                  style={{
+                    backgroundImage:
+                      "linear-gradient(rgba(34,197,94,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(34,197,94,0.08) 1px, transparent 1px)",
+                    backgroundSize: "40px 40px",
+                  }}
+                >
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Total Portfolio Ledger</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-300">
+                        Neon green tracks marked portfolio value. Pale blue tracks total capital invested. Gold dots show portfolio transactions.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <span className="rounded-full border border-[#00ff66]/30 bg-[#00ff66]/10 px-3 py-2 font-semibold text-[#7cff9f] shadow-[0_0_18px_rgba(0,255,102,0.12)]">Portfolio Value</span>
+                      <span className="rounded-full border border-[#9ddcff]/30 bg-[#8bd3ff]/10 px-3 py-2 font-semibold text-[#b7e7ff] shadow-[0_0_18px_rgba(139,211,255,0.12)]">Invested</span>
+                      <span className="rounded-full border border-[#ffd166]/30 bg-[#ffd166]/10 px-3 py-2 font-semibold text-[#ffd166] shadow-[0_0_18px_rgba(255,209,102,0.12)]">Transactions</span>
+                    </div>
+                  </div>
+                  <div className="h-[420px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={totalPortfolioPerformance} margin={{ top: 36, right: 18, left: 4, bottom: 0 }}>
+                        <CartesianGrid stroke="rgba(34,197,94,0.16)" strokeDasharray="2 6" />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} minTickGap={18} tick={{ fill: "#6ee7b7", fontSize: 11 }} />
+                        <YAxis
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fill: "#6ee7b7", fontSize: 11 }}
+                          tickFormatter={(value) => `฿${formatCompactTHB.format(Number(value))}`}
+                          label={{ value: "Portfolio Value THB", angle: -90, position: "insideLeft", fill: "#34d399", fontSize: 11 }}
+                        />
+                        <Tooltip
+                          content={<TotalPortfolioTooltip />}
+                          cursor={{ stroke: "rgba(0,255,102,0.55)", strokeWidth: 1.5, strokeDasharray: "4 4" }}
+                        />
+                        <Legend verticalAlign="top" align="left" iconType="circle" wrapperStyle={{ color: "#cbd5e1", fontSize: 12, paddingBottom: 16, left: 4, top: 0 }} />
+                        <Line
+                          name="Portfolio value"
+                          type="monotone"
+                          dataKey="portfolioValueTHB"
+                          stroke="#00ff66"
+                          strokeWidth={3}
+                          dot={false}
+                          activeDot={{ r: 6, stroke: "#d9ffe5", strokeWidth: 2, fill: "#00ff66" }}
+                        />
+                        <Line
+                          name="Total capital invested"
+                          type="monotone"
+                          dataKey="cumulativeInvestedTHB"
+                          stroke="#9ddcff"
+                          strokeWidth={3}
+                          dot={false}
+                          activeDot={{ r: 6, stroke: "#e0f5ff", strokeWidth: 2, fill: "#9ddcff" }}
+                        />
+                        <Scatter name="Transaction points" dataKey="portfolioValueTHB" fill="#ffd166" shape="circle" legendType="circle" />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </ClaudyCard>
             </section>
 
             <section>
